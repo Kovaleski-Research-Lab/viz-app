@@ -1,0 +1,37 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: ethan-viz
+spec:
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+      - name: streamlit-container
+        image: continuumio/miniconda3:latest
+        command: ["/bin/bash", "-c"]
+        args:
+          - |
+            mkdir -p /develop/code
+            git clone https://github.com/Kovaleski-Research-Lab/viz-app.git /develop/code/viz-app
+            cd /develop/code/viz-app
+            conda env create -f environment.yml
+            source activate viz-env
+            streamlit run app.py --server.port=8501 --server.address=0.0.0.0
+        ports:
+          - containerPort: 8501
+        resources:
+          requests:
+            memory: 200Gi
+            cpu: 32
+          limits:
+            memory: 200Gi
+            cpu: 32
+        volumeMounts:
+          - name: training-results
+            mountPath: /develop/results
+
+      volumes:
+        - name: training-results
+          persistentVolumeClaim:
+            claimName: training-results
