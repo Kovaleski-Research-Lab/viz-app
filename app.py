@@ -34,7 +34,6 @@ def parse_metadata(pair_tuple, root_dir):
     g_path = Path(groundtruth)
     # relative_parts: how the path looks *relative* to root_dir
     rel_parts = g_path.relative_to(root_dir).parts  # e.g. ("meep_meep", "lstm", "one_to_many", "sequential", "model_15_v1", "flipbooks", "sample_0_phase_groundtruth.gif")
-    
     # Expecting something like:
     #   [0] meep_meep
     #   [1] <model_type or "modelstm">
@@ -44,6 +43,7 @@ def parse_metadata(pair_tuple, root_dir):
     #   next: model_XX...
     #   next: flipbooks
     #   next: actual .gif
+    
 
     # rel_parts[0] should be "meep_meep"
     # rel_parts[1] is typically model_type (unless it's "modelstm").
@@ -54,7 +54,24 @@ def parse_metadata(pair_tuple, root_dir):
     time_series_type = None
     architecture = None
     model_id = None
+    train_static = None
+    valid_static = None
+    loss_plot = None
+    mse_evolution = None
 
+    model_base_dir = "/".join(rel_parts[:-2])
+    
+    loss_plot = os.path.join(root_dir, model_base_dir, "loss_plots", "loss.pdf")
+    mse_evolution = os.path.join(root_dir, model_base_dir, "performance_metrics","mse_evolution.pdf")
+    #st.write(loss_plot)
+    
+    dft_plots_dir = os.path.join(root_dir, model_base_dir, "dft_plots")
+    for filename in os.listdir(dft_plots_dir):
+        if "Training" in filename:
+                train_static = os.path.join(dft_plots_dir, filename)
+        elif "Validation" in filename:
+            valid_static = os.path.join(dft_plots_dir, filename)
+                
     # A quick helper to read safely from rel_parts by index
     def get_part(index):
         return rel_parts[index] if index < len(rel_parts) else None
@@ -108,6 +125,10 @@ def parse_metadata(pair_tuple, root_dir):
         "model_id": model_id,
         "groundtruth": groundtruth,
         "prediction": prediction,
+        "loss_plot": loss_plot,
+        "train_static": train_static,
+        "valid_static": valid_static,
+        "mse_evolution": mse_evolution,
     }
 
 
@@ -193,7 +214,7 @@ if not filtered_pairs:
     st.stop()
     
 # Construct dynamic title based on filters
-title_parts = ["Flipbooks"]
+title_parts = ["Results"]
 if selected_model_type != "All":
     title_parts.append(selected_model_type.upper())  # e.g., "LSTM", "MODELSTM"
     if selected_model_type == "modelstm" and selected_sub_model_type and selected_sub_model_type != "All":
@@ -205,6 +226,15 @@ if selected_architecture != "All":
 
 # Set dynamic page title
 st.title(" - ".join(title_parts))
+
+# Global dropdown menu for selecting content type
+st.write("<div style='text-align: center;'>", unsafe_allow_html=True)
+selected_plot = st.selectbox(
+    "Select content type to display for all models:",
+    ["Flipbooks", "Loss Plot", "MSE Evolution", "Training Static Plot", "Validation Static Plot"],
+    index=0
+)
+st.write("</div>", unsafe_allow_html=True)
 
 ################################################################################
 # Step 4: Group pairs by (model_id) so we can display them in “cards.”
@@ -339,36 +369,68 @@ def display_info_in_columns(info_dict, num_columns=4):
             st.write(f"**{key}:** {value if value is not None else 'N/A'}")
 
 
-# Iterate through models and display their cards 
+def display_pdf(file_path, caption=""):
+    """
+    Displays a PDF file in Streamlit using an embed tag.
+    """
+    if not os.path.exists(file_path):
+        st.warning(f"{caption} not found.")
+        return
+    with st.container():
+        with open(file_path, "rb") as f:
+            st.write(f"### {caption}")
+            base64_pdf = base64.b64encode(f.read()).decode('utf-8')
+            pdf_display = f'<embed src="data:application/pdf;base64,{base64_pdf}" width="100%" height="600px" type="application/pdf">'
+            st.markdown(pdf_display, unsafe_allow_html=True)
+
+
+# Iterate through models and display their cards
 for model_id, items in models_dict.items():
     # Title for the model
     st.markdown(f"### Model ID: {model_id}")
-    
+
     # Load and display params.yaml
     params_path = os.path.join(Path(items[0]["groundtruth"]).parent.parent, "params.yaml")
     params = read_params_file(params_path)
     display_model_params(params)
-    
-    channel = ['Magnitude', 'Phase']
-    cols = st.columns(4)  # Create 4 columns in a single row
 
-    # Each "item" in items is one groundtruth/prediction pair
-    for i, meta in enumerate(items, start=1):
-        groundtruth = meta["groundtruth"]
-        prediction = meta["prediction"]
-        
-        c = channel[i % 2]
-        if c == 'Phase':
-            idx = [0, 1]
-        else:
-            idx = [2, 3]
+    if selected_plot == "Flipbooks":
+        channel = ['Magnitude', 'Phase']
+        cols = st.columns(4)  # Create 4 columns in a single row
 
-        with cols[idx[0]]:
-            st.caption(f"Ground Truth {c}")
-            st.image(groundtruth, use_container_width=True)
+        # Display flipbook pairs
+        for i, meta in enumerate(items, start=1):
+            groundtruth = meta["groundtruth"]
+            prediction = meta["prediction"]
 
-        with cols[idx[1]]:
-            st.caption(f"Predicted {c}")
-            st.image(prediction, use_container_width=True)
+            c = channel[i % 2]
+            if c == 'Phase':
+                idx = [0, 1]
+            else:
+                idx = [2, 3]
+
+            with cols[idx[0]]:
+                st.caption(f"Ground Truth {c}")
+                st.image(groundtruth, use_container_width=True)
+
+            with cols[idx[1]]:
+                st.caption(f"Predicted {c}")
+                st.image(prediction, use_container_width=True)
+
+    elif selected_plot == "Loss Plot":
+        loss_plot_path = items[0].get("loss_plot")
+        display_pdf(loss_plot_path, caption="Loss Plot")
+
+    elif selected_plot == "MSE Evolution":
+        mse_evolution_path = items[0].get("mse_evolution")
+        display_pdf(mse_evolution_path, caption="MSE Evolution")
+
+    elif selected_plot == "Training Static Plot":
+        train_static_path = items[0].get("train_static")
+        display_pdf(train_static_path, caption="Training Static Plot")
+
+    elif selected_plot == "Validation Static Plot":
+        valid_static_path = items[0].get("valid_static")
+        display_pdf(valid_static_path, caption="Validation Static Plot")
 
     st.divider()  # Divider for clarity
