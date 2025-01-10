@@ -1,0 +1,16 @@
+name: viz-env
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.9
+  - pydantic
+  - matplotlib
+  - ipython
+  - jupyterlab
+  - pandas
+  - numpy
+  - pip
+  - pip:
+    - streamlit
+    - kubernetes
