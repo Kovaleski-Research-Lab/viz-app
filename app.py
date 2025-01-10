@@ -286,7 +286,7 @@ def display_model_params(params):
     }
 
     # Display all information in a single card
-    with st.expander("Model Parameters", expanded=True):
+    with st.expander("Model Parameters", expanded=False):
         st.write("### General Hyperparameters")
         display_info_in_columns(general_info)
 
