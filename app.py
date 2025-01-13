@@ -3,6 +3,7 @@ import os
 from pathlib import Path
 import base64
 import yaml
+import re
 
 st.set_page_config(page_title="Model Flipbooks", layout="wide")
 #st.title("Model Flipbook Comparisons")
@@ -56,6 +57,8 @@ def parse_metadata(pair_tuple, root_dir):
     model_id = None
     train_static = None
     valid_static = None
+    train_metrics = None
+    valid_metrics = None
     loss_plot = None
     mse_evolution = None
 
@@ -71,6 +74,9 @@ def parse_metadata(pair_tuple, root_dir):
                 train_static = os.path.join(dft_plots_dir, filename)
         elif "Validation" in filename:
             valid_static = os.path.join(dft_plots_dir, filename)
+            
+    train_metrics = os.path.join(root_dir, model_base_dir, "performance_metrics", "train_metrics.txt")
+    valid_metrics = os.path.join(root_dir, model_base_dir, "performance_metrics", "valid_metrics.txt")
                 
     # A quick helper to read safely from rel_parts by index
     def get_part(index):
@@ -128,6 +134,8 @@ def parse_metadata(pair_tuple, root_dir):
         "loss_plot": loss_plot,
         "train_static": train_static,
         "valid_static": valid_static,
+        "train_metrics": train_metrics,
+        "valid_metrics": valid_metrics,
         "mse_evolution": mse_evolution,
     }
 
@@ -161,7 +169,7 @@ def find_flipbook_pairs(root_dir):
 all_pairs = find_flipbook_pairs(RESULTS_DIR)
 
 if not all_pairs:
-    st.warning(f"No flipbook pairs found under {RESULTS_DIR}, womp womp.")
+    st.warning(f"No flipbook pairs found under {RESULTS_DIR}.")
     st.stop()
 
 # Collect possible filter options:
@@ -173,11 +181,19 @@ model_ids = sorted(set(p["model_id"] for p in all_pairs if p["model_id"]))
 
 # Sidebar filters
 st.sidebar.title("Menu")
-with st.sidebar.expander("Filters", expanded=False):
+# add checkbox for showing/hiding performance metrics
+show_params = st.sidebar.checkbox("Show Model Parameters", value=False)
+show_metrics = st.sidebar.checkbox("Show Performance Metrics", value=False)
+selected_plot = st.sidebar.selectbox(
+    "Select content type to display for all models:",
+    ["Flipbooks", "Loss Plot", "MSE Evolution", "Training Static Plot", "Validation Static Plot"],
+    index=0
+)
+with st.sidebar.expander("Filters", expanded=True):
     selected_model_type = st.selectbox("Model Type", options=["All"] + model_types)
     selected_sub_model_type = None
     if selected_model_type == "modelstm" and len(sub_model_types) > 0:
-        selected_sub_model_type = st.selectbox("ModelSTM Sub-Type", options=["All"] + sub_model_types)
+        selected_sub_model_type = st.selectbox("Mode-LSTM Sub-Type", options=["All"] + sub_model_types)
 
     selected_time_series_type = st.selectbox("Time Series Type", options=["All"] + time_series_types)
     selected_architecture = st.selectbox("Architecture", options=["All"] + architectures)
@@ -227,15 +243,6 @@ if selected_architecture != "All":
 # Set dynamic page title
 st.title(" - ".join(title_parts))
 
-# Global dropdown menu for selecting content type
-st.write("<div style='text-align: center;'>", unsafe_allow_html=True)
-selected_plot = st.selectbox(
-    "Select content type to display for all models:",
-    ["Flipbooks", "Loss Plot", "MSE Evolution", "Training Static Plot", "Validation Static Plot"],
-    index=0
-)
-st.write("</div>", unsafe_allow_html=True)
-
 ################################################################################
 # Step 4: Group pairs by (model_id) so we can display them in “cards.”
 ################################################################################
@@ -264,6 +271,16 @@ def read_params_file(params_path):
         params = yaml.safe_load(f)
     return params
 
+def read_text_file(text_path):
+    """
+    Reads and parses the text file.
+    """
+    if not os.path.exists(text_path):
+        return None
+    with open(text_path, "r") as f:
+        text = f.read()
+    return text
+
 def display_model_params(params):
     """
     Displays a card with general and architecture-specific parameters, organized into columns.
@@ -286,7 +303,7 @@ def display_model_params(params):
     }
 
     # Display all information in a single card
-    with st.expander("Model Parameters", expanded=False):
+    with st.expander("Model Parameters", expanded=show_params):
         st.write("### General Hyperparameters")
         display_info_in_columns(general_info)
 
@@ -355,6 +372,34 @@ def display_model_params(params):
             modelstm_info = {}
             display_info_in_columns(modelstm_info)
 
+def parse_metrics(metrics_text):
+    """
+    Parses a metrics string into a dictionary.
+    """
+    metrics = {}
+    # Regular expression to match "key: value" pairs
+    matches = re.findall(r"(\w+): ([\d\.]+(?: \+\-/ [\d\.]+)?)", metrics_text)
+    for key, value in matches:
+        if key != 'SSIM' and key != 'MAE':
+            metrics[key] = value
+    return metrics
+
+def display_performance_metrics(train_path, valid_path):
+    """
+    Displays the performance metrics for the model in a structured format.
+    """
+    train_metrics_text = read_text_file(train_path)
+    valid_metrics_text = read_text_file(valid_path)
+
+    with st.expander("Performance Metrics", expanded=show_metrics):
+        st.write("### Resubstitution")
+        train_metrics = parse_metrics(train_metrics_text)
+        display_info_in_columns(train_metrics, num_columns=5)
+
+        st.write("### Validation")
+        valid_metrics = parse_metrics(valid_metrics_text)
+        display_info_in_columns(valid_metrics, num_columns=5)
+
 
 def display_info_in_columns(info_dict, num_columns=4):
     """
@@ -367,8 +412,7 @@ def display_info_in_columns(info_dict, num_columns=4):
         col = columns[idx % num_columns]
         with col:
             st.write(f"**{key}:** {value if value is not None else 'N/A'}")
-
-
+            
 def display_pdf(file_path, caption=""):
     """
     Displays a PDF file in Streamlit using an embed tag.
@@ -396,6 +440,11 @@ else:
         params_path = os.path.join(Path(items[0]["groundtruth"]).parent.parent, "params.yaml")
         params = read_params_file(params_path)
         display_model_params(params)
+
+        # Display performance metrics
+        train_path = items[0].get("train_metrics")
+        valid_path = items[0].get("valid_metrics")
+        display_performance_metrics(train_path, valid_path)
 
         if selected_plot == "Flipbooks":
             channel = ['Magnitude', 'Phase']
