@@ -383,54 +383,57 @@ def display_pdf(file_path, caption=""):
             pdf_display = f'<embed src="data:application/pdf;base64,{base64_pdf}" width="100%" height="600px" type="application/pdf">'
             st.markdown(pdf_display, unsafe_allow_html=True)
 
+# Check if the user has made a valid selection in the dropdown and filters
+if selected_plot == "Flipbooks" and selected_model_type == "All" and selected_time_series_type == "All" and selected_architecture == "All" and selected_model_id == "All":
+    st.warning("Please make a selection from the filtering menu to display results.")
+else:
+    # Iterate through models and display their cards
+    for model_id, items in models_dict.items():
+        # Title for the model
+        st.markdown(f"### Model ID: {model_id}")
 
-# Iterate through models and display their cards
-for model_id, items in models_dict.items():
-    # Title for the model
-    st.markdown(f"### Model ID: {model_id}")
+        # Load and display params.yaml
+        params_path = os.path.join(Path(items[0]["groundtruth"]).parent.parent, "params.yaml")
+        params = read_params_file(params_path)
+        display_model_params(params)
 
-    # Load and display params.yaml
-    params_path = os.path.join(Path(items[0]["groundtruth"]).parent.parent, "params.yaml")
-    params = read_params_file(params_path)
-    display_model_params(params)
+        if selected_plot == "Flipbooks":
+            channel = ['Magnitude', 'Phase']
+            cols = st.columns(4)  # Create 4 columns in a single row
 
-    if selected_plot == "Flipbooks":
-        channel = ['Magnitude', 'Phase']
-        cols = st.columns(4)  # Create 4 columns in a single row
+            # Display flipbook pairs
+            for i, meta in enumerate(items, start=1):
+                groundtruth = meta["groundtruth"]
+                prediction = meta["prediction"]
 
-        # Display flipbook pairs
-        for i, meta in enumerate(items, start=1):
-            groundtruth = meta["groundtruth"]
-            prediction = meta["prediction"]
+                c = channel[i % 2]
+                if c == 'Phase':
+                    idx = [0, 1]
+                else:
+                    idx = [2, 3]
 
-            c = channel[i % 2]
-            if c == 'Phase':
-                idx = [0, 1]
-            else:
-                idx = [2, 3]
+                with cols[idx[0]]:
+                    st.caption(f"Ground Truth {c}")
+                    st.image(groundtruth, use_container_width=True)
 
-            with cols[idx[0]]:
-                st.caption(f"Ground Truth {c}")
-                st.image(groundtruth, use_container_width=True)
+                with cols[idx[1]]:
+                    st.caption(f"Predicted {c}")
+                    st.image(prediction, use_container_width=True)
 
-            with cols[idx[1]]:
-                st.caption(f"Predicted {c}")
-                st.image(prediction, use_container_width=True)
+        elif selected_plot == "Loss Plot":
+            loss_plot_path = items[0].get("loss_plot")
+            display_pdf(loss_plot_path, caption="Loss Plot")
 
-    elif selected_plot == "Loss Plot":
-        loss_plot_path = items[0].get("loss_plot")
-        display_pdf(loss_plot_path, caption="Loss Plot")
+        elif selected_plot == "MSE Evolution":
+            mse_evolution_path = items[0].get("mse_evolution")
+            display_pdf(mse_evolution_path, caption="MSE Evolution")
 
-    elif selected_plot == "MSE Evolution":
-        mse_evolution_path = items[0].get("mse_evolution")
-        display_pdf(mse_evolution_path, caption="MSE Evolution")
+        elif selected_plot == "Training Static Plot":
+            train_static_path = items[0].get("train_static")
+            display_pdf(train_static_path, caption="Training Static Plot")
 
-    elif selected_plot == "Training Static Plot":
-        train_static_path = items[0].get("train_static")
-        display_pdf(train_static_path, caption="Training Static Plot")
+        elif selected_plot == "Validation Static Plot":
+            valid_static_path = items[0].get("valid_static")
+            display_pdf(valid_static_path, caption="Validation Static Plot")
 
-    elif selected_plot == "Validation Static Plot":
-        valid_static_path = items[0].get("valid_static")
-        display_pdf(valid_static_path, caption="Validation Static Plot")
-
-    st.divider()  # Divider for clarity
+        st.divider()  # Divider for clarity
