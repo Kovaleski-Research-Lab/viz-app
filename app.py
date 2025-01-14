@@ -33,17 +33,17 @@ def parse_metadata(pair_tuple, root_dir):
 
     # Convert to pathlib for easier path slicing
     g_path = Path(groundtruth)
+        
     # relative_parts: how the path looks *relative* to root_dir
     rel_parts = g_path.relative_to(root_dir).parts  # e.g. ("meep_meep", "lstm", "one_to_many", "sequential", "model_15_v1", "flipbooks", "sample_0_phase_groundtruth.gif")
-    # Expecting something like:
-    #   [0] meep_meep
-    #   [1] <model_type or "modelstm">
-    #   possibly [2] <svd/random> if modelstm
-    #   next: one_to_many or many_to_many
-    #   next: sequential or distributed
-    #   next: model_XX...
-    #   next: flipbooks
-    #   next: actual .gif
+
+    # Find if there's an eval_# subdirectory
+    eval_dir = None
+    for part in rel_parts:
+        # This regex matches "eval_", followed by one or more digits
+        if re.match(r"eval_\d+", part):
+            eval_dir = part
+            break
     
 
     # rel_parts[0] should be "meep_meep"
@@ -64,7 +64,11 @@ def parse_metadata(pair_tuple, root_dir):
 
     model_base_dir = "/".join(rel_parts[:-2])
     
-    loss_plot = os.path.join(root_dir, model_base_dir, "loss_plots", "loss.pdf")
+    if "eval" in model_base_dir.split("/")[-1]:
+        # everything except the last part
+        loss_plot = os.path.join(root_dir, "/".join(model_base_dir.split("/")[:-1]), "loss_plots", "loss.pdf")
+    else:
+        loss_plot = os.path.join(root_dir, model_base_dir, "loss_plots", "loss.pdf")
     mse_evolution = os.path.join(root_dir, model_base_dir, "performance_metrics","mse_evolution.pdf")
     #st.write(loss_plot)
     
@@ -129,6 +133,7 @@ def parse_metadata(pair_tuple, root_dir):
         "time_series_type": time_series_type,
         "architecture": architecture,
         "model_id": model_id,
+        "eval_dir": eval_dir,
         "groundtruth": groundtruth,
         "prediction": prediction,
         "loss_plot": loss_plot,
@@ -249,12 +254,13 @@ st.title(" - ".join(title_parts))
 
 from collections import defaultdict
 
-models_dict = defaultdict(list)  
-# Key = model_id, Value = list of pairs that belong to that model
+from collections import defaultdict
+models_dict = defaultdict(lambda: defaultdict(list))
 
 for pdict in filtered_pairs:
     model_id = pdict["model_id"] or "unknown"
-    models_dict[model_id].append(pdict)
+    eval_dir = pdict["eval_dir"] or "no_eval_subdir"
+    models_dict[model_id][eval_dir].append(pdict)
 
 ################################################################################
 # Step 5: Display results in a card-like layout
@@ -299,7 +305,7 @@ def display_model_params(params):
         "LR Scheduler": params.get("model", {}).get("lr_scheduler"),
         "Learning Rate": params.get("model", {}).get("learning_rate"),
         "Sequence Length": params.get("model", {}).get("seq_len"),
-        "Wavelength": params.get("data", {}).get("eval_wavelength"),
+        "Wavelength(s)": params.get("data", {}).get("wv_eval"),
     }
 
     # Display all information in a single card
@@ -432,57 +438,77 @@ if selected_plot == "Flipbooks" and selected_model_type == "All" and selected_ti
     st.warning("Please make a selection from the filtering menu to display results.")
 else:
     # Iterate through models and display their cards
-    for model_id, items in models_dict.items():
-        # Title for the model
+    for model_id, eval_dict in models_dict.items():
         st.markdown(f"### Model ID: {model_id}")
+        if selected_plot == "Loss Plot":
+            # Just show the loss plot once for this model, ignoring eval folders
+            # Grab any subfolder’s items, or specifically the "no_eval_subdir" if present
+            if "no_eval_subdir" in eval_dict:
+                # Use the items from `no_eval_subdir`
+                loss_plot_items = eval_dict["no_eval_subdir"]
+            else:
+                # Fallback: pick the first eval folder that exists
+                any_eval_subdir = next(iter(eval_dict.keys()))
+                loss_plot_items = eval_dict[any_eval_subdir]
 
-        # Load and display params.yaml
-        params_path = os.path.join(Path(items[0]["groundtruth"]).parent.parent, "params.yaml")
-        params = read_params_file(params_path)
-        display_model_params(params)
+            if not loss_plot_items:
+                st.warning("No loss plot found.")
+            else:
+                loss_plot_path = loss_plot_items[0].get("loss_plot")
+                display_pdf(loss_plot_path, caption="Loss Plot")
 
-        # Display performance metrics
-        train_path = items[0].get("train_metrics")
-        valid_path = items[0].get("valid_metrics")
-        display_performance_metrics(train_path, valid_path)
+        else:
+            for eval_subdir, items in eval_dict.items():
+                if eval_subdir != "no_eval_subdir":
+                    st.markdown(f"**Evaluation Folder:** {eval_subdir}")
 
-        if selected_plot == "Flipbooks":
-            channel = ['Magnitude', 'Phase']
-            cols = st.columns(4)  # Create 4 columns in a single row
+                # Load and display params.yaml
+                #st.write(f"* {items}")
+                params_path = os.path.join(Path(items[0]["groundtruth"]).parent.parent, "params.yaml")
+                params = read_params_file(params_path)
+                if not params:
+                    params_path = os.path.join(Path(items[0]["groundtruth"]).parent.parent.parent, "config.yaml")
+                    params = read_params_file(params_path)
+                display_model_params(params)
 
-            # Display flipbook pairs
-            for i, meta in enumerate(items, start=1):
-                groundtruth = meta["groundtruth"]
-                prediction = meta["prediction"]
+                # Display performance metrics
+                train_path = items[0].get("train_metrics")
+                valid_path = items[0].get("valid_metrics")
+                display_performance_metrics(train_path, valid_path)
 
-                c = channel[i % 2]
-                if c == 'Phase':
-                    idx = [0, 1]
-                else:
-                    idx = [2, 3]
+                if selected_plot == "Flipbooks":
+                    channel = ['Magnitude', 'Phase']
+                    cols = st.columns(4)  # Create 4 columns in a single row
 
-                with cols[idx[0]]:
-                    st.caption(f"Ground Truth {c}")
-                    st.image(groundtruth, use_container_width=True)
+                    # Display flipbook pairs
+                    for i, meta in enumerate(items, start=1):
+                        groundtruth = meta["groundtruth"]
+                        prediction = meta["prediction"]
 
-                with cols[idx[1]]:
-                    st.caption(f"Predicted {c}")
-                    st.image(prediction, use_container_width=True)
+                        c = channel[i % 2]
+                        if c == 'Phase':
+                            idx = [0, 1]
+                        else:
+                            idx = [2, 3]
 
-        elif selected_plot == "Loss Plot":
-            loss_plot_path = items[0].get("loss_plot")
-            display_pdf(loss_plot_path, caption="Loss Plot")
+                        with cols[idx[0]]:
+                            st.caption(f"Ground Truth {c}")
+                            st.image(groundtruth, use_container_width=True)
 
-        elif selected_plot == "MSE Evolution":
-            mse_evolution_path = items[0].get("mse_evolution")
-            display_pdf(mse_evolution_path, caption="MSE Evolution")
+                        with cols[idx[1]]:
+                            st.caption(f"Predicted {c}")
+                            st.image(prediction, use_container_width=True)
 
-        elif selected_plot == "Training Static Plot":
-            train_static_path = items[0].get("train_static")
-            display_pdf(train_static_path, caption="Training Static Plot")
+                elif selected_plot == "MSE Evolution":
+                    mse_evolution_path = items[0].get("mse_evolution")
+                    display_pdf(mse_evolution_path, caption="MSE Evolution")
 
-        elif selected_plot == "Validation Static Plot":
-            valid_static_path = items[0].get("valid_static")
-            display_pdf(valid_static_path, caption="Validation Static Plot")
+                elif selected_plot == "Training Static Plot":
+                    train_static_path = items[0].get("train_static")
+                    display_pdf(train_static_path, caption="Training Static Plot")
 
-        st.divider()  # Divider for clarity
+                elif selected_plot == "Validation Static Plot":
+                    valid_static_path = items[0].get("valid_static")
+                    display_pdf(valid_static_path, caption="Validation Static Plot")
+
+                st.divider()  # Divider for clarity
