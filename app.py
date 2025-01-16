@@ -458,7 +458,8 @@ else:
                 display_pdf(loss_plot_path, caption="Loss Plot")
 
         else:
-            for eval_subdir, items in eval_dict.items():
+            # sort eval_subdir ascending, i.e. 'eval_1' -> 'eval_2' -> 'eval_3'
+            for eval_subdir, items in sorted(eval_dict.items(), key=lambda x: int(x[0].split('_')[1])):
                 if eval_subdir != "no_eval_subdir":
                     st.markdown(f"**Evaluation Folder:** {eval_subdir}")
 
@@ -477,7 +478,7 @@ else:
                 display_performance_metrics(train_path, valid_path)
 
                 if selected_plot == "Flipbooks":
-                    channel = ['Magnitude', 'Phase']
+                    channel = ['Phase', 'Magnitude']
                     cols = st.columns(4)  # Create 4 columns in a single row
 
                     # Display flipbook pairs
