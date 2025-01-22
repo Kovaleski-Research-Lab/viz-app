@@ -432,6 +432,19 @@ def display_pdf(file_path, caption=""):
             base64_pdf = base64.b64encode(f.read()).decode('utf-8')
             pdf_display = f'<embed src="data:application/pdf;base64,{base64_pdf}" width="100%" height="600px" type="application/pdf">'
             st.markdown(pdf_display, unsafe_allow_html=True)
+            
+def safe_int_subdir(key):
+    """
+    Extracts the integer after the underscore in `key`.
+    If not possible, return a large number (or 0, or whatever fits your logic).
+    """
+    parts = key.split('_')
+    # We expect something like "eval_2"
+    if len(parts) > 1 and parts[1].isdigit():
+        return int(parts[1])
+    else:
+        # Fallback if there's no integer
+        return float('inf')
 
 # Check if the user has made a valid selection in the dropdown and filters
 if selected_plot == "Flipbooks" and selected_model_type == "All" and selected_time_series_type == "All" and selected_architecture == "All" and selected_model_id == "All":
@@ -459,7 +472,7 @@ else:
 
         else:
             # sort eval_subdir ascending, i.e. 'eval_1' -> 'eval_2' -> 'eval_3'
-            for eval_subdir, items in sorted(eval_dict.items(), key=lambda x: int(x[0].split('_')[1])):
+            for eval_subdir, items in sorted(eval_dict.items(), key=lambda x:safe_int_subdir(x[0])):
                 if eval_subdir != "no_eval_subdir":
                     st.markdown(f"**Evaluation Folder:** {eval_subdir}")
 
